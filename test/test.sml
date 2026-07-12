@@ -99,6 +99,76 @@ struct
       (* values: [5,7,7,2,0] *)
       val () = checkIntList "layered adds" ([5,7,7,2,0], S.toList a2)
       val () = checkInt "rangeSum [1..3]" (16, S.rangeSum a2 1 3)
+
+      val () = section "Bit: properties (sml-check, seed 0wx1)"
+      val seed : Check.seed = 0wx1
+
+      (* Generator: a nonempty list of small ints (values kept small so
+         prefixSum/total can't overflow the default 32-bit int on MLton). *)
+      val smallInt = Check.choose (~1000, 1000)
+      val genList = Check.nonEmptyListOf smallInt
+
+      fun showIntList xs = "[" ^ String.concatWith "," (List.map Int.toString xs) ^ "]"
+
+      (* fromList xs then toList reproduces xs exactly. *)
+      val () =
+        Harness.check "prop: fromList/toList round-trips"
+          (case Check.quickCheck
+                  (Check.forAll genList showIntList
+                     (fn xs => B.toList (B.fromList xs) = xs)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* prefixSum i always agrees with the naive reference sum. *)
+      val () =
+        Harness.check "prop: prefixSum matches naive prefix sum at every index"
+          (case Check.quickCheck
+                  (Check.forAll genList showIntList
+                     (fn xs =>
+                        let val b = B.fromList xs
+                        in List.all (fn i => B.prefixSum b i = naivePrefix xs i)
+                                    (List.tabulate (length xs, fn i => i))
+                        end)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* total always equals prefixSum at the last index. *)
+      val () =
+        Harness.check "prop: total = prefixSum (size - 1)"
+          (case Check.quickCheck
+                  (Check.forAll genList showIntList
+                     (fn xs =>
+                        let val b = B.fromList xs
+                        in B.total b = B.prefixSum b (B.size b - 1) end)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
+
+      (* update b i delta increases total by exactly delta, leaving every
+         other index's value unchanged. *)
+      val () =
+        Harness.check "prop: update adds delta to total and only touches index i"
+          (case Check.quickCheck
+                  (Check.forAll
+                     (Check.bind genList (fn xs =>
+                        Check.bind (Check.choose (0, length xs - 1)) (fn i =>
+                          Check.map (fn d => (xs, i, d))
+                            (Check.choose (~500, 500)))))
+                     (fn (xs, i, d) => showIntList xs ^ " i=" ^ Int.toString i
+                                        ^ " d=" ^ Int.toString d)
+                     (fn (xs, i, d) =>
+                        let
+                          val b = B.fromList xs
+                          val b' = B.update b i d
+                          val othersUnchanged =
+                            List.all (fn j => j = i orelse B.get b' j = B.get b j)
+                                     (List.tabulate (length xs, fn j => j))
+                        in
+                          B.total b' = B.total b + d
+                          andalso B.get b' i = B.get b i + d
+                          andalso othersUnchanged
+                        end)) of
+               Check.Passed _ => true
+             | Check.Failed _ => false)
     in
       Harness.run ()
     end
