@@ -44,8 +44,16 @@ struct
     else if lo = hi then (lo, s)
     else
       let
-        (* span = hi - lo + 1, as Word64; safe since ints fit in 63 bits *)
-        val span = W.fromInt (hi - lo) + 0w1
+        (* span = hi - lo + 1, as Word64. Subtract in Word64 space (which
+           wraps, never raises) rather than computing `hi - lo` in native
+           int first: native int is only ~31/32 bits on MLton vs ~63 bits
+           on Poly/ML, so a wide range (e.g. ~2000000000 to 2000000000)
+           overflows on MLton while the identical call succeeds on
+           Poly/ML. W.fromInt truncates to the low-order bits per the
+           Basis spec rather than raising, so widening both operands
+           before subtracting sidesteps the platform-dependent native-int
+           width entirely. *)
+        val span = (W.fromInt hi - W.fromInt lo) + 0w1
         (* largest multiple of span that fits; reject above it *)
         val limit = W.- (0w0, W.mod (W.- (0w0, span), span))  (* = floor(2^64/span)*span *)
         fun loop s =
